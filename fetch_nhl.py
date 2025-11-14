@@ -1,56 +1,88 @@
 import requests
 
+SEASON = "20242025"
+
 def fetch_all_players():
-    skaters_url = "https://api-web.nhle.com/v1/skater-stats-leaders/20242025/2?categories=goals&limit=-1"
-    goalies_url = "https://api-web.nhle.com/v1/goalie-stats-leaders/20242025/2?limit=-1"
-    
     all_players = []
-    
+
+    # Step 1: Get all teams
+    teams_url = "https://statsapi.web.nhl.com/api/v1/teams"
     try:
-        skaters_response = requests.get(skaters_url, timeout=10)
-        skaters_response.raise_for_status()
-        skaters_data = skaters_response.json()
-        
-        players_list = skaters_data.get("players", [])
-        for player in players_list:
-            all_players.append({
-                "name": player.get("firstName", {}).get("default", "") + " " + player.get("lastName", {}).get("default", ""),
-                "position": player.get("position", ""),
-                "team": player.get("teamAbbrev", ""),
-                "gamesPlayed": player.get("gamesPlayed", 0),
-                "goals": player.get("goals", 0),
-                "assists": player.get("assists", 0),
-                "points": player.get("points", 0),
-                "ppPoints": player.get("powerPlayPoints", 0),
-                "shPoints": player.get("shorthandedPoints", 0),
-                "gameWinningGoals": player.get("gameWinningGoals", 0),
-                "shots": player.get("shots", 0),
-                "hits": player.get("hits", 0),
-                "blocks": player.get("blockedShots", 0),
-                "playerType": "skater"
-            })
+        teams_data = requests.get(teams_url, timeout=10).json()
+        teams = teams_data.get("teams", [])
     except Exception as e:
-        print(f"Error fetching skaters: {e}")
-    
-    try:
-        goalies_response = requests.get(goalies_url, timeout=10)
-        goalies_response.raise_for_status()
-        goalies_data = goalies_response.json()
-        
-        goalies_list = goalies_data.get("goalies", [])
-        for player in goalies_list:
-            all_players.append({
-                "name": player.get("firstName", {}).get("default", "") + " " + player.get("lastName", {}).get("default", ""),
-                "position": "G",
-                "team": player.get("teamAbbrev", ""),
-                "gamesPlayed": player.get("gamesPlayed", 0),
-                "goalieWins": player.get("wins", 0),
-                "savePercentage": player.get("savePercentage", 0.0),
-                "goalsAgainstAverage": player.get("goalsAgainstAverage", 0.0),
-                "shutouts": player.get("shutouts", 0),
-                "playerType": "goalie"
-            })
-    except Exception as e:
-        print(f"Error fetching goalies: {e}")
-    
+        print(f"Error fetching teams: {e}")
+        return all_players
+
+    # Step 2: Loop through each team
+    for team in teams:
+        team_id = team.get("id")
+        team_abbrev = team.get("abbreviation", "")
+        roster_url = f"https://statsapi.web.nhl.com/api/v1/teams/{team_id}/roster"
+        try:
+            roster_data = requests.get(roster_url, timeout=10).json()
+            roster = roster_data.get("roster", [])
+        except Exception as e:
+            print(f"Error fetching roster for team {team_abbrev}: {e}")
+            continue
+
+        # Step 3: Loop through each player on the roster
+        for player in roster:
+            person = player.get("person", {})
+            player_id = person.get("id")
+            full_name = person.get("fullName", "")
+            position = player.get("position", {}).get("abbreviation", "")
+
+            # Step 4: Fetch player stats
+            stats_url = f"https://statsapi.web.nhl.com/api/v1/people/{player_id}/stats?stats=statsSingleSeason&season={SEASON}"
+            try:
+                stats_data = requests.get(stats_url, timeout=10).json()
+                stats_list = stats_data.get("stats", [])
+                splits = stats_list[0].get("splits", []) if stats_list else []
+                if splits:
+                    stat = splits[0].get("stat", {})
+                else:
+                    stat = {}
+            except Exception as e:
+                print(f"Error fetching stats for player {full_name}: {e}")
+                stat = {}
+
+            # Step 5: Separate skaters and goalies
+            if position == "G":
+                all_players.append({
+                    "name": full_name,
+                    "position": "G",
+                    "team": team_abbrev,
+                    "gamesPlayed": stat.get("games", 0),
+                    "goalieWins": stat.get("wins", 0),
+                    "savePercentage": stat.get("savePercentage", 0.0),
+                    "goalsAgainstAverage": stat.get("goalAgainstAverage", 0.0),
+                    "shutouts": stat.get("shutouts", 0),
+                    "playerType": "goalie"
+                })
+            else:
+                all_players.append({
+                    "name": full_name,
+                    "position": position,
+                    "team": team_abbrev,
+                    "gamesPlayed": stat.get("games", 0),
+                    "goals": stat.get("goals", 0),
+                    "assists": stat.get("assists", 0),
+                    "points": stat.get("points", 0),
+                    "ppPoints": stat.get("powerPlayPoints", 0),
+                    "shPoints": stat.get("shortHandedPoints", 0),
+                    "gameWinningGoals": stat.get("gameWinningGoals", 0),
+                    "shots": stat.get("shots", 0),
+                    "hits": stat.get("hits", 0),
+                    "blocks": stat.get("blocked", 0),
+                    "playerType": "skater"
+                })
+
     return all_players
+
+# Quick test
+if __name__ == "__main__":
+    players = fetch_all_players()
+    print(f"Fetched {len(players)} players")
+    for p in players[:5]:
+        print(p)
