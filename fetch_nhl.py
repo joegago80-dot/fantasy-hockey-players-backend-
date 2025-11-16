@@ -1,99 +1,83 @@
-import requests
+# fetch_nhl.py
+from edgework import Edgework
 import json
 from pathlib import Path
+import time
 
-SEASON = "20242025"
 OUTPUT_FILE = Path("players.json")
+SEASON = "2024-2025"  # Edgework season format
+CACHE_EXPIRY = 24 * 3600  # 24 hours
 
 def fetch_all_players():
-    all_players = []
+    """
+    Fetch all skaters and goalies via Edgework.
+    Uses local cache (players.json) if data is fresh.
+    """
+    # Check cache
+    if OUTPUT_FILE.exists():
+        mtime = OUTPUT_FILE.stat().st_mtime
+        if time.time() - mtime < CACHE_EXPIRY:
+            with OUTPUT_FILE.open("r", encoding="utf-8") as f:
+                print("Loading players from cache")
+                return json.load(f)
 
+    print("Fetching players from Edgework NHL API...")
+    client = Edgework(user_agent="FantasyHockeyBackend/1.0")
+    players = []
+
+    # Fetch skaters
     try:
-        teams_data = requests.get("https://statsapi.web.nhl.com/api/v1/teams", timeout=10).json()
-        teams = teams_data.get("teams", [])
+        skaters = client.skater_stats(season=SEASON, sort="points", limit=1000)
+        for s in skaters:
+            players.append({
+                "name": s.name,
+                "position": s.position,
+                "team": s.team,
+                "gamesPlayed": s.games_played,
+                "goals": s.goals,
+                "assists": s.assists,
+                "points": s.points,
+                "ppPoints": getattr(s, "power_play_points", 0),
+                "shPoints": getattr(s, "short_handed_points", 0),
+                "gameWinningGoals": getattr(s, "game_winning_goals", 0),
+                "shots": getattr(s, "shots", 0),
+                "hits": getattr(s, "hits", 0),
+                "blocks": getattr(s, "blocked_shots", 0),
+                "playerType": "skater"
+            })
     except Exception as e:
-        print(f"Error fetching teams: {e}")
-        return []
+        print(f"Error fetching skaters: {e}")
 
-    for team in teams:
-        team_id = team.get("id")
-        team_abbrev = team.get("abbreviation", "N/A")
+    # Fetch goalies
+    try:
+        goalies = client.goalie_stats(season=SEASON, sort="wins", limit=500)
+        for g in goalies:
+            players.append({
+                "name": g.name,
+                "position": "G",
+                "team": g.team,
+                "gamesPlayed": g.games_played,
+                "goalieWins": g.wins,
+                "savePercentage": getattr(g, "save_pct", 0.0),
+                "playerType": "goalie"
+            })
+    except Exception as e:
+        print(f"Error fetching goalies: {e}")
 
-        try:
-            roster_data = requests.get(f"https://statsapi.web.nhl.com/api/v1/teams/{team_id}/roster", timeout=10).json()
-            roster = roster_data.get("roster", [])
-        except Exception as e:
-            print(f"Error fetching roster for {team_abbrev}: {e}")
-            continue
-
-        for player in roster:
-            person = player.get("person", {})
-            player_id = person.get("id")
-            full_name = person.get("fullName", "N/A")
-            position_abbrev = player.get("position", {}).get("abbreviation", "N/A")
-
-            try:
-                stats_url = f"https://statsapi.web.nhl.com/api/v1/people/{player_id}/stats?stats=statsSingleSeason&season={SEASON}"
-                stats_data = requests.get(stats_url, timeout=10).json()
-                splits = stats_data.get("stats", [{}])[0].get("splits", [])
-                stat = splits[0].get("stat", {}) if splits else {}
-            except Exception as e:
-                print(f"Error fetching stats for {full_name}: {e}")
-                stat = {}
-
-            if position_abbrev == "G":
-                all_players.append({
-                    "name": full_name,
-                    "position": "G",
-                    "team": team_abbrev,
-                    "gamesPlayed": stat.get("games", 0),
-                    "goalieWins": stat.get("wins", 0),
-                    "savePercentage": stat.get("savePercentage", 0.0),
-                    "goalsAgainstAverage": stat.get("goalAgainstAverage", 0.0),
-                    "shutouts": stat.get("shutouts", 0),
-                    "playerType": "goalie"
-                })
-            else:
-                all_players.append({
-                    "name": full_name,
-                    "position": position_abbrev,
-                    "team": team_abbrev,
-                    "gamesPlayed": stat.get("games", 0),
-                    "goals": stat.get("goals", 0),
-                    "assists": stat.get("assists", 0),
-                    "points": stat.get("points", 0),
-                    "ppPoints": stat.get("powerPlayPoints", 0),
-                    "shPoints": stat.get("shortHandedPoints", 0),
-                    "gameWinningGoals": stat.get("gameWinningGoals", 0),
-                    "shots": stat.get("shots", 0),
-                    "hits": stat.get("hits", 0),
-                    "blocks": stat.get("blocked", 0),
-                    "playerType": "skater"
-                })
-
-    print(f"Fetched {len(all_players)} players from NHL API")
-    return all_players
-
-
-def save_players_json(players):
+    # Save cache
     try:
         with OUTPUT_FILE.open("w", encoding="utf-8") as f:
             json.dump(players, f, indent=2)
         print(f"Saved {len(players)} players to {OUTPUT_FILE}")
     except Exception as e:
-        print(f"Error saving JSON: {e}")
+        print(f"Error saving players.json: {e}")
+
+    return players
 
 
-def load_players_json():
-    if OUTPUT_FILE.exists():
-        try:
-            with OUTPUT_FILE.open("r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"Error loading JSON: {e}")
-            return []
-    return []
-
+# Quick test
 if __name__ == "__main__":
     players = fetch_all_players()
-    save_players_json(players)
+    print(f"Fetched {len(players)} players")
+    for p in players[:5]:
+        print(p)
