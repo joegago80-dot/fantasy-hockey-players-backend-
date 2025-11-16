@@ -1,44 +1,44 @@
 from typing import List, Dict
-import requests
 
-# Try NHL API client first
+# Primary client
 try:
     from nhl_stats_api_client import NHLAPIClient
     has_nhl_client = True
 except ImportError:
     has_nhl_client = False
 
-# Fallback: sportsreference for NHL
+# Fallback client
 try:
     from sportsreference.nhl.roster import Player as SRPlayer
     has_sportsref = True
 except ImportError:
     has_sportsref = False
 
-SEASON = "2024-25"  # format used by NHLAPIClient / sportsreference may differ
+SEASON = "2024-25"
 
 def fetch_all_players() -> List[Dict]:
     players = []
 
-    # First: try using nhl_stats_api_client
+    # ===== Primary: nhl-stats-api-client =====
     if has_nhl_client:
         try:
             client = NHLAPIClient()
-            # Get list of teams
-            teams = client.get_teams()["data"]
+            teams = client.get_teams().get("data", [])
             for team in teams:
-                team_id = team["id"]
-                # Get roster / season players
-                roster = client.get_roster(team_id, SEASON)["data"]
+                team_id = team.get("id")
+                roster = client.get_roster(team_id, SEASON).get("data", [])
                 for p in roster:
-                    pid = p["id"]
+                    pid = p.get("id")
                     stats = client.get_player_season_stats(pid, SEASON)
-                    # Depending on stats structure; assume skater / goalie
-                    if stats.get("primaryPosition") == "G":
+
+                    # Determine player type
+                    player_type = "goalie" if stats.get("primaryPosition") == "G" else "skater"
+
+                    if player_type == "goalie":
                         players.append({
-                            "name": p["fullName"],
+                            "name": p.get("fullName", "N/A"),
                             "position": "G",
-                            "team": p.get("currentTeamAbbrevs", ""),
+                            "team": p.get("currentTeamAbbrevs", "N/A"),
                             "gamesPlayed": stats.get("gamesPlayed", 0),
                             "goalieWins": stats.get("wins", 0),
                             "savePercentage": stats.get("savePct", 0.0),
@@ -46,9 +46,9 @@ def fetch_all_players() -> List[Dict]:
                         })
                     else:
                         players.append({
-                            "name": p["fullName"],
-                            "position": stats.get("primaryPosition", ""),
-                            "team": p.get("currentTeamAbbrevs", ""),
+                            "name": p.get("fullName", "N/A"),
+                            "position": stats.get("primaryPosition", "N/A"),
+                            "team": p.get("currentTeamAbbrevs", "N/A"),
                             "gamesPlayed": stats.get("gamesPlayed", 0),
                             "goals": stats.get("goals", 0),
                             "assists": stats.get("assists", 0),
@@ -65,41 +65,47 @@ def fetch_all_players() -> List[Dict]:
         except Exception as e:
             print("Error in NHLAPIClient:", e)
 
-    # Fallback: sportsreference
+    # ===== Fallback: sportsreference =====
     if has_sportsref:
         try:
-            # sportsreference does not have *all* players easily; you may need to maintain a list of IDs
-            # Here is a simple example using a few known player IDs or team rosters:
-            # For simplicity, scraping a small set or a fixed list is shown; adapt as needed.
-            example_ids = ["matthewsau01", "mcdavcon01"]  # proper ids should be looked up
+            # Example: small list of player IDs; expand as needed
+            example_ids = ["matthewsau01", "mcdavcon01"]  # Replace with full roster IDs
             for pid in example_ids:
                 sr = SRPlayer(pid)
-                career_games = sr.games_played
-                # If you want only this season:
+                # Season stats
                 try:
                     sr_season = sr(SEASON)
                 except Exception:
                     sr_season = sr  # fallback to career
+
+                # Determine if goalie (SportsReference may not include goalies fully)
+                player_type = "skater"  # assume skater
                 players.append({
-                    "name": sr_season.name,
-                    "position": sr_season.position,
-                    "team": sr_season.team_abbreviation,
-                    "gamesPlayed": sr_season.games_played,
-                    "goals": sr_season.goals or 0,
-                    "assists": sr_season.assists or 0,
-                    "points": sr_season.points or 0,
+                    "name": getattr(sr_season, "name", "N/A"),
+                    "position": getattr(sr_season, "position", "N/A"),
+                    "team": getattr(sr_season, "team_abbreviation", "N/A"),
+                    "gamesPlayed": getattr(sr_season, "games_played", 0),
+                    "goals": getattr(sr_season, "goals", 0),
+                    "assists": getattr(sr_season, "assists", 0),
+                    "points": getattr(sr_season, "points", 0),
                     "ppPoints": getattr(sr_season, "power_play_points", 0),
                     "shPoints": getattr(sr_season, "short_handed_points", 0),
                     "gameWinningGoals": getattr(sr_season, "game_winning_goals", 0),
                     "shots": getattr(sr_season, "shots", 0),
                     "hits": getattr(sr_season, "hits", 0),
                     "blocks": getattr(sr_season, "blocked", 0),
-                    "playerType": "skater"
+                    "playerType": player_type
                 })
             return players
         except Exception as e:
             print("Error in sportsreference fallback:", e)
 
-    # If neither method works, return empty list
-    print("No API client or fallback available")
+    print("No data source available or all failed")
     return players
+
+# ===== Quick test =====
+if __name__ == "__main__":
+    all_players = fetch_all_players()
+    print(f"Fetched {len(all_players)} players")
+    for p in all_players[:5]:
+        print(p)
