@@ -1,8 +1,5 @@
 fastapi
 uvicorn
 requests
-pydantic
-fastapi
-pydantic
-requests
-uvicorn
+nhl-stats-api-client
+sportsreference
